@@ -1,0 +1,308 @@
+---
+title: "FLIGHT Lab"
+author: "Bill Drummond"
+date: "10/6/2021"
+output: html_document
+always_allow_html: true
+---
+
+
+# FLIGHT dataset background
+
+The EPA requires large facilities to report their CO2 emissions each year if they exceed 25,000 MT.  The FLIGHT database is the result.  It consists of a series of spreadsheets: one for each year from 2010 to 2019 with substantial detail, and one summary sheet that collects CO2 emissions for all available years.
+
+For this lab we will be using the summary spreadsheet for all years.
+
+# Advanced tidyverse commands for this lab
+
+In the FLIGHT lab we will be using these new tidyverse commands:
+
+1. **pivot_longer()**: converts a wide-format dataset (with variables in columns) to a long-format dataset (with variables in rows)
+2. **pivot_wider()**: converts a long-format dataset (with variables in rows) to a wide-format dataset (with variables in columns)
+3. **group_by()**: divides a dataset into a set of groups
+4. **summarize()**: calculates summary values for a group of records and outputs a single record for the group
+5. **left_join()**: adds variables to a dataset from a second dataset
+
+# Setup lab
+
+Start RStudio and open the flight-lab-setup.R file.
+
+Use the mouse to highlight all the code and press CTRL+ENTER or the Run button in the upper-right of the editor window.
+
+
+```{r setup, include=TRUE, echo=FALSE, results=FALSE}
+knitr::opts_chunk$set(echo = TRUE,message = FALSE,warnings = FALSE)
+library(tidyverse)
+library(readxl)
+library(sf)
+library(tmap)
+
+source("./functions/functions1b.R")
+
+```
+
+# Load yearly FLIGHT data
+
+The original data is available from:
+
+https://ghgdata.epa.gov/ghgp/main.do?site_preference=normal
+
+Note: read_excel() can specify a particular sheet within an Excel file, and it can skip rows at the top of the spreadsheet to ignore titles and other introductory information.  Drummond's tolow2() function creates valid R column names in lowercase.
+
+```{r Load FLIGHT}
+
+flight1 = read_excel("./data/ghgp_data_by_year.xlsx",
+                    sheet="Direct Emitters",skip=3) %>% 
+  tolow2() 
+
+```
+
+Note: read_excel() can specify a particular sheet within an Excel file, and it can skip rows at the top of the spreadsheet to ignore titles and other introductory information.  Drummond's tolow2() function creates valid R column names in lowercase.
+
+View the dataset and note the separate columns for each year's data.  This is not a tidy format.  For example, if you want to use ggplot to show Georgia Tech's emissions over time, the time variable and the emissions for each year must be in two columns.
+
+# pivot_longer() in action
+
+The next command pivots the yearly emissions from columns to rows and stores the old variable names in a new column named xyear.
+
+**pivot_longer()** converts a wide-format dataset with a set of variables in columns to a long format dataset with the variables running down rows instead of across columns.
+
+The command (1) creates a new column containing the names of the old variables, (2) creates a new column containing the datavalues in the old variables, and (3) deletes the old variables.  
+
+To use this command you must specify:
+
+the new column name to hold the old variable names, (names_to="newvarnamecol")
+
+the new column name to hold the old variable values (values_to="newdatavaluecol"),
+
+the columns to convert from wide format to long format (cols=4:13)
+
+The mutate command creates a new numeric column containing the numeric year value, and the select command chooses varialbe to keep and renames some of them.
+
+```{r Pivot longer}
+flight2 = flight1 %>% 
+  filter(state == "GA") %>% 
+  pivot_longer(names_to="xyear", values_to="co2mt", 
+               cols=14:22) %>% 
+  mutate(year = as.integer(str_sub(xyear,2,6)),
+         naics = as.character(primary.naics.code)) %>% 
+  select(facilityid = facility.id,
+         name = facility.name,
+         state = state, county = county, year,
+         naics,
+         sectors = latest.reported.industry.type.sectors,
+         lat = latitude, lon=longitude,
+         co2mt)
+```
+
+View the flight2 dataset to confirm it has been correctly created.
+
+# With tidy data we can better use ggplot
+
+Create a basic plot of Georgia Tech's emissions with this command:
+
+```{r}
+ggplot(subset(flight2, str_sub(name,1,12) == "GEORGIA INST")) +
+  geom_line(aes(year,co2mt))
+```
+
+# Mapping the FLIGHT data
+
+To prepare for mapping, the following commands limit the records to the year 2019 and exclude power plants, whose emissions are by far the largest, so we can distinguish other non-power-plant sources.
+
+The st_as_sf() command creates a point GIS dataset from the lon and lat fields, and puts the name field first in the dataset to improve mouse-hover information.
+
+Run this code and take 5 minutes to browse the resulting map.
+
+```{r}
+flightmap = flight2 %>% 
+  filter(year == 2019) %>% 
+  filter(sectors != "Power Plants") %>% 
+  st_as_sf(coords = c("lon", "lat"), crs=4326) %>% 
+  select(name,everything())
+```
+
+We will make an interactive map using OpenStreetMap as the base, coloring the locations based upon sectors, and sizing the circles by size of emissions.
+
+Run the code below and take 5 minutes to browse the resulting map.
+
+```{r}
+tmap_mode("view")
+
+tm_basemap("OpenStreetMap") +
+tm_shape(flightmap) +
+  tm_dots(col="sectors",
+          size="co2mt",
+          legend.show = FALSE,
+          popup.vars=c(
+          "Sector: " = "sectors",
+          "Naics code: " = "naics",
+          "CO2 in mt: " = "co2mt" 
+          ))
+```
+
+
+
+
+# group_by() and summarize()
+
+We will now use the group_by() and summarize() commands to create, for each facility, the sum, mean, min, max, and standard deviation of emissions across all years.  We use group_by with both facilityid and name so name will appear in the output dataset.
+
+```{r}
+flightsum1 = flight2 %>% 
+  group_by(facilityid, name) %>% 
+  summarize(sumco2mt = sum(co2mt),
+            avgco2mt = mean(co2mt),
+            minco2mt = min(co2mt),
+            maxco2mt = max(co2mt),
+            stdco2mt = sd(co2mt))
+```
+
+View the dataset to check the output, and find the row for Georgia Tech.
+
+-----
+
+Suppose we wish to calculate statistics for each county for 2019, but we want R to ignore any missing values. When R computes a sum or mean it generates a value of NA if even one original value is missing. The following code tells R that NA values should be removed before calculations.
+
+```{r}
+
+flightsum2 = flight2 %>% 
+  filter(year == 2019) %>% 
+  group_by(state,county) %>% 
+  summarize(cntco2mt = n(),
+            sumco2mt = sum(co2mt,na.rm=TRUE),
+            avgco2mt = mean(co2mt,na.rm=TRUE),
+            minco2mt = min(co2mt),
+            maxco2mt = max(co2mt),
+            stdco2mt = sd(co2mt,na.rm=TRUE))
+```
+
+View this dataset, paying special attention to county names.  Sadly, they are inconsistent in capitalization and whether or not the word "County" is part of the county name.  We'll return to this issue when we explore joins.
+
+-----
+
+Now we'll answer the question: in 2019 Fulton County what percent of emissions did each facility (including GT) contribute?
+
+We'll first filter for Fulton County in 2019.  Then we'll use the sum() subcommand with mutate rather than summarize.  This will add the co2mt values for all records then store that same sum in every record as fulco2mt.  We can then calculate each facility's percentage of Fulton's emissions.
+
+```{r}
+flightpercent = flight2 %>% 
+  filter(year == 2019 & 
+         state == "GA" &
+         county == "FULTON COUNTY") %>% 
+  mutate(fulco2mt = sum(co2mt,na.rm=TRUE),
+         percentful = co2mt / fulco2mt * 100) %>% 
+  select(name, state, county, year, fulco2mt, co2mt, percentful)
+```
+
+View the output and note that the value of fulco2mt is the same in all rows, as it should be.
+
+# pivot_wider() for calculating new values
+
+Our next task is to calculate, for each Georgia facility, the change in emissions from 2011 to 2019.  To do this we'll need both years of data in the same row.
+
+Enter pivot_wider(), which takes inputs of names_from=year and values_from=co2mt.  The former column (year) provides the names for the new columns and the latter column (co2mt) provides the data values themselves.  Because column names shouldn't begin with numbers, R adds an X to the begining of the variable name for each year.
+
+Note: pivot_longer() required three inputs: names_to, values_to, and cols, since it was necessary to tell the command exactly which columns should be converted from wide to long.  pivot_wider() only requires the names_from and values_from inputs since it will be creating as many columns as there are different unique values of the names_from variable, in this case, year.
+
+```{r}
+flightwider = flight2 %>% 
+           filter(state == "GA") %>%
+  pivot_wider(names_from=year, values_from=co2mt) %>% 
+  tolow() %>% 
+  mutate(pcincrease = (X2019-X2011)/X2011 * 100) %>% 
+  select(name, X2011, X2019, pcincrease)
+```
+
+View and check the resulting output dataset.
+
+# Using left_join to add matching values from a second dataset
+
+Now assume we want to scale or normalize industrial emissions based on the number of industrial employees in each county, and we have a dataset of annual industrial, commercial, and total employment for each county.  
+
+We read the employment dataset stored as an R rds object, eliminate the statewide employment
+
+```{r}
+indemp = readRDS("./data/indemp.rds")
+```
+
+View emp1 and note that counties are identified by geocode, not by name.  
+
+-----
+
+How can we connect this dataset to our county emissions dataset?  We will do it by using a bridging dataset that has both county names and geocodes.
+
+```{r}
+gacounty = read_excel("./data/gacounty.xls") %>% 
+  mutate(countyname = toupper(countyname))
+```
+
+Use View and check the format of county names, which have all been converted to upper case to eliminate any mis-matches due to capitalization.
+
+-----
+
+Now we will need to clean up the county names in the emissions dataset.  We will filter the dataset to eliminate power plants, then summarize CO2 emissions by county and year.
+
+-----
+
+The flight2 code below cleans up the county names by converting them all to upper case, removing the " COUNTY" string from any names that include it, adding the " COUNTY, GEORGIA" string to all names, and converting the names to upper case to match the names in gacounty.
+
+```{r}
+flightga1 = flight2 %>%  
+  filter(sectors != "Power Plants") %>% 
+  group_by(county, year) %>% 
+  summarize(sumco2mt = sum(co2mt,na.rm=TRUE))
+
+flightga2 = flightga1 %>% 
+  mutate(county2 = toupper(county),
+         county2 = str_remove(county2," COUNTY"),
+         countyname = paste0(county2, " COUNTY, GEORGIA"))
+```
+
+
+We can now join the emissions dataset to gacounty (using the county name), then join that dataset to the employment dataset (using the geocode) and calculate industrial emissions per industrial employee for each county.
+
+```{r}
+flightga3 = flightga2 %>% left_join(gacounty)
+
+flightga4 = flightga3 %>% left_join(indemp) %>% 
+  mutate(co2mtperemp = sumco2mt/indemp)
+
+```
+
+
+# Four major types of join commands
+
+There are four major types of join (and a few more minor ones):
+
+1. left_join(): retains all records in the original dataset
+2. right_join(): retains all records in the second dataset
+3. inner_join(): retains only successfully matched records
+4. full_join(): retains all records from both datasets
+
+# Specifying join variables
+
+Here are a few join variations:
+
+dfjoined1 = df1  %>% left_join(df2): This command version assumes one or more common variables with identical variable names.  The join automatically uses all common variables.
+
+dfjoined2 = df1  %>% left_join(df2, **by=“col1”**): Specifies a single join variable
+
+dfjoined3 = df1  %>% left_join(df2, **by=c(“col1”,”col2”)**): Specifies multiple join variables
+
+dfjoined4 = df1  %>% left_join(df2, **by=c(“col1” = ”col2”)**): Matches on columns with different names
+
+# A last few useful tidyverse commands
+
+**arrange(varname)**: Sort from low to high
+
+**arrange(desc(varname))**: Sort from high to low
+
+**rename(newname = oldname)**: Rename a variable
+
+**bind_cols()**: Add new columns (one-to-one, with no matching with fields)
+
+**bind_rows()**: Add new rows with common variables placed in the same columns
+
+
+
