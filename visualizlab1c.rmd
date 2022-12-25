@@ -1,0 +1,234 @@
+---
+title: "Visualization Lab"
+author: "Bill Drummond"
+date: "8/30/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE)
+```
+
+## Lab Setup
+
+This lab helps address Major Question #1 in Climate Change Analytics:  
+
+**What and where are the current and likely future climate and weather impacts of climate change?**  
+
+We will be using historic county-level data from the [National Centers for Environmental Information](https://www.ncei.noaa.gov/news/noaa-offers-climate-data-counties) that has been downloaded from the [NCEI ftp site](ftp://ftp.ncdc.noaa.gov/pub/data/cirs/climdiv/).
+
+There are four variables:
+
+* tmax is temperature maximum (average of daily maximums in degrees F)
+* tmin is temperature minimum (average of daily minimums in degrees F)
+* tavg is temperature average (mean of maximum and minimum in degrees F)
+* precipitation the sum of daily values in inches)
+
+
+The datasets contain values for each month in each year from 1895 to several months ago.
+
+-----
+-----
+-----
+
+**Important startup note**
+
+Before running any of the lab code, enter the following command (without the hashtag) into the RStudio console, but alter the path so it points to the correct location of your class0421 folder.
+
+```{r}
+# setwd("m:/temp/class0221v2")
+```
+
+-----
+-----
+-----
+
+This code loads libraries.  If you get an error, you may need to install one or more libraries.
+```{r Setup, results="hide",warning=FALSE,message=FALSE}
+library(tidyverse)
+library(readxl)
+library(lubridate)
+library(plotly)
+library(htmlwidgets)
+
+```
+
+
+## Datasets
+
+The code below reads an example dataset stored in the R rds (RDataSet) format.
+
+```{r}
+c0 = readRDS("./data/county0.rds")
+```
+
+In the upper right Environment window, click on c0 to view the dataset.  This is the same basic format as the original dataset, which was simple text before it was read into R.
+
+This dataset has data for onlyh five of the central counties in the Atlanta metro area: Clayton, Cobb, DeKalb, Fulton, and Gwinnett.  The twelve months of data are listed in 12 separate columns.  All data is for the precipitation variable, whose variable number in the original data is 01.
+
+-----
+-----
+-----
+
+The code below reads the c3 dataset, a moderately-processed version of the full 3000+ county dataset for all four variables.
+
+```{r}
+c3 = readRDS("./data/c3.rds")
+```
+
+Open this dataset in the viewer.  Note the long format.  Each row is now a county/variable combination. There are three actual columns of datavalues:
+
+* The early period is the average of 30 early years: 1895-1925.  
+* The late period is the average of the most recent 15 years: 2005-2020.  
+* Delta is the late value minus the early value, and represents the change in the value over the last century (or so).
+
+## Visualizing with static plots
+
+We will now work with the tmax variable, which is especially important for the health of workers who must work outside or in buildings that are not air conditioned.
+
+```{r}
+plotdata = c3 %>% 
+  filter(varname == "tmax") %>% 
+  mutate(earlyvalue = round(earlyvalue,2),
+         latevalue = round(latevalue,2),
+         delta = round(delta,2)) %>% 
+  select(countyname,geocode,earlyvalue,latevalue,delta)
+```
+
+Notice the **=**. This is an **assignment** command that assigns whatever is the output from the right-hand side of the = to the variable name on the left-hand side of the equal.  Many R programmers use <- (an arrow) rather than the =.  
+
+Notice the **%>%**.  This is a **pipe** command that passes (or pipes) a dataset (c3 in this case) to one or more commands, then stores the result in new variable named in the  beginning of the command (plotdata).  The pipe allows you to build sequences of commands that pipe the output of one command directly into the input of the next command.
+
+Notice the **filter**.  This command is from the tidyverse dplyr package.  It **subsets** a dataset based on a condition, so the result of this filter will only include tmax records.
+
+Notice the **==**.  The double-equals is used in R to test for equality.  A single-equals means assignment of the result on the right-hand side to the name on the left-hand-side.  A double-equals means you are testing to see if the object on the left-hand side is equal to the object on the right-hand side.
+
+Notice the **mutate**.  This dplyr command re-calculates a variable or calculates a new variable.  The round() function will reduce the number of decimal places for readability.
+
+Notice the **select**.  This dplyr command chooses only the listed variables and/or changes the order of variables.
+
+The simple ggplot below creates our first scattergram.  We are trying to understand the relationship between (maximum) temperatures in the early period (1895-1924) and changes in the maximum temperature since then.
+
+```{r}
+ggplot() +
+  geom_point(data=plotdata,aes(x=earlyvalue,y=delta))
+```
+
+In the code above, notice how ggplot uses the + to link separate subcommands into a single graph.  
+
+In ggplot the **aes** stands for **aesthetic**, and it allows us to specify which variables we want to represent on the x axis, y axis, and for more complex graphs to colors, shapes, sizes, and other display characteristics.
+
+Now to the graph content.  Compare the overall height (delta) of points on the left side of the graph (cooler places in the early period) to the overall height of points on the right hand side of the graph (hotter places in the early period).  As an overall generalization, which type of place (cooler or hotter) gained more in temperature?
+
+If you had to draw a single straight line to summarize the data, would it slope upward, downward, or be relatively flat?
+
+We'll now use the standard statistical technique of linear regression to calculate and draw that line.
+
+```{r}
+ggplot() +
+  geom_point(data=plotdata,aes(x=earlyvalue,y=delta)) +
+  geom_smooth(data=plotdata,aes(x=earlyvalue,y=delta),
+              method=lm,se=FALSE,color="orange")
+```
+
+Notice how we've added a second graphic element, a smooth (in our case, so smooth it's completely straight) line.  
+
+(The se=FALSE stops ggplot from drawing the standard error range around the line, which can be confusing.)  
+
+The method=lm estimates a "linear model" (short for linear regression model) for the data to create the line.
+
+Notice how we've specified a color for the line.  R has many, many named colors.  Google "R color names" for images and lists.
+
+But the relationship between 1900 temperature and temperature increases may be more complex.
+
+-----
+-----
+-----
+
+To test whether the relationship between 1900 temperature and temperature change may be non-linear, we will fit a curve to the data using loess regression.
+
+```{r}
+ggplot() +
+  geom_point(data=plotdata,aes(x=earlyvalue,y=delta)) +
+  geom_smooth(data=plotdata,aes(x=earlyvalue,y=delta),
+              method=lm,se=FALSE,color="orange") +
+  geom_smooth(data=plotdata,aes(x=earlyvalue,y=delta),
+            method=loess,se=FALSE,color="yellow") 
+```
+
+We have now layered three graphic elements, points, a straight line, and a smooth curve.
+
+Examine the yellow curve.  What does the curve say about places whose 1900 temparature was above 75 or so?  Notice the highest dot above the 80 degree vertical line.  How much did that county's temperature increase over the last century?
+
+-----
+-----
+-----
+
+If we are particularly interested in our state (and we are) and Georgia Tech's county (and we certainly are!), we can show subsets of the data in different colors and/or sizes.
+
+```{r}
+ggplot() +
+  geom_point(data=plotdata,aes(x=earlyvalue,y=delta)) +
+  geom_smooth(data=plotdata,aes(x=earlyvalue,y=delta),
+              method=lm,se=FALSE,color="orange") +
+  geom_smooth(data=plotdata,aes(x=earlyvalue,y=delta),
+              method=loess,se=FALSE,color="yellow") +
+  geom_point(data=subset(plotdata,str_sub(geocode,1,3)=="g13"),
+             aes(x=earlyvalue,y=delta),color="red") +
+  geom_point(data=subset(plotdata,geocode=="g13121"),
+             aes(x=earlyvalue,y=delta),color="blue",size=5)
+```
+
+The **data=subset(plotdata,sub_str(geocode,1,3)=="g13")** subcommand applies something like dplyr's filter command to restrict the records being plotted to a subset of rows.
+
+The **str_sub()** function extracts a shorter substring from a longer string.  All Georgia counties have geocodes that start with "g13" so the str_sub function pulls characters 1 to 3 and compares it to "g13."  Only matching counties are retained and plotted in red. 
+
+We can now see Fulton County with the large blue dot, and all Georgia counties shown in red.  Notice that one Georgia county has already increased more than 2 degrees F, while about 10 or so Georgia counties have actually declined in temperature.
+
+## Visualizing with interactive plots
+
+It would be nice if we could determine exactly which county is represented by which dot.  But there are certainly too many to label.  Instead, we can create a dynamic interactive version of our (previously static) graphic.
+
+```{r}
+plot5 = ggplot() +
+  geom_point(data=plotdata,aes(x=earlyvalue,y=delta,text=countyname)) +
+  geom_smooth(data=plotdata,aes(x=earlyvalue,y=delta),
+              method=lm,se=FALSE,color="orange") +
+  geom_smooth(data=plotdata,aes(x=earlyvalue,y=delta),
+              method=loess,se=FALSE,color="yellow") +
+  geom_point(data=subset(plotdata,str_sub(geocode,1,3)=="g13"),
+             aes(x=earlyvalue,y=delta,text=countyname),color="red") +
+  geom_point(data=subset(plotdata,geocode=="g13121"),
+             aes(x=earlyvalue,y=delta,text=countyname),color="blue",size=5)
+
+ggplotly(plot5)
+```
+
+We have added the "text=countyname" to the aes in order to show county names when we hover the mouse over a point, in the interactive version.
+
+We store our entire plot as a ggplot object named plot5.  We then use the ggplotly command from the plotly library to convert the static plot into an interactive one.
+
+Use the mouse cursor to hover over individual dots.  You'll see the county name, earlyvalue, and delta for that county.
+
+* Identify the Georgia county with the greatest increase in temparature.  
+* Identify the county whose 1900 temparature was 80, and has now increased by more than 3 degrees.
+* Identify the two counties with the highest temperature increases in the country.
+
+-----
+-----
+-----
+
+We will now save our interactive plot as a full html page capable of being uploaded to a website and served to anyone with the URL.
+
+```{r}
+
+iplot5 = ggplotly(plot5)
+saveWidget(iplot5,"iplot5.html")
+```
+
+You have now saved your interactive plot as the stand-along Web page named iplot5.html. Open the class folder in windows explorer and click on iplot5.html, and you should be able to explore your plot in the same way you did in R.
+
+Congradulations!  You now have experience with powerful R tools to visualize data and even create Web pages that allow the users to explore the data for themselves.
+
+In the next lab, we will extend our visualization skills into R mapping and interactive Web-based maps.
+
