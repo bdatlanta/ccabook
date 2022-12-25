@@ -1,0 +1,410 @@
+---
+title: "R Spatial Vector Lab"
+author: "Bill Drummond"
+date: "11/17/2021"
+output: html_document
+always_allow_html: true
+---
+
+
+# Setup the lab
+
+Open the lab setup file, edit the setwd() path if needed, and run the code to load the lab's spatial datasets.
+
+```{r setup, include=TRUE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(warnings = FALSE)
+library(tidyverse)
+library(readxl)
+library(sf)
+library(tmap)
+
+setwd("c:/temp/class2321")
+
+source("./functions/functions1c.R")
+
+states = st_read("./gisdata/cb_2018_us_state_20m.shp") %>% 
+  tolow() %>% 
+  st_transform(4326) %>% 
+  filter(!(stusps %in% c("AK", "HI", "PR")))
+counties = st_read("./gisdata/cb_2018_us_county_20m.shp") %>% 
+  tolow() %>% 
+  st_transform(4326)
+nercs = st_read("./gisdata/NercRegions_201907.shp") %>% 
+  tolow() 
+
+tlines = st_read("./gisdata/HVTranLines.shp") %>% 
+  tolow() 
+plants = st_read("./gisdata/PowerPlants_US_202004.shp") %>% 
+  tolow() %>% 
+  filter(total_mw >= 100) %>% 
+  filter(!(statename %in% c("Alaska", "Hawaii", "Puerto Rico")))
+
+```
+
+# Task 1: Plotting map data with ggplot
+
+In addition to using plot for simple plots and tmap for complex ones, the ggplot package can be used to create better-than-plot-command output but not-as-good-as-tmap output.
+
+For making quick plots to view spatial datasets, it is a better alternative to plot since it provides more options and handles sf spatial data with the special geom_sf() command.
+
+```{r}
+
+ggplot() +
+  geom_sf(data=nercs,aes(fill=nerc)) +
+  geom_sf(data=plants) +
+  geom_sf(data=tlines,color="gray")
+
+```
+
+Below is the tmap equivalent. Note: sometimes tmap will balk at invalid or complex polygons with some kind of geometric irregularity.  The st_make_valid() command can fix invalid polygons.
+
+```{r}
+
+tmap_mode("plot")
+
+x1 = st_is_valid(nercs)
+print(x1)
+
+nercs2 = st_make_valid(nercs)
+x2 = st_is_valid(nercs2)
+print(x2)
+
+tm_shape(nercs2) +
+  tm_polygons("nerc") +
+tm_shape(plants) +
+  tm_dots() + 
+tm_shape(tlines) +
+  tm_lines(col = "gray")
+
+```
+
+Although we'll be using ggplot for this lab, one of the the big advantages of tmap is the ability to generate interactive maps.
+
+```{r}
+tmap_mode("view")
+
+tm_shape(nercs2) +
+  tm_polygons("nerc") +
+tm_shape(plants) +
+  tm_dots() + 
+tm_shape(tlines) +
+  tm_lines(col = "gray")
+
+```
+
+
+
+# Task 2: Projecting with a Human Readable OGC WKT projection
+
+Remember: sf provides three ways to specify projections: 
+
+1. EPSG numbers
+2. Proj4 text strings
+3. OGC WKT text strings or OGC WKT human-readable text strings
+
+The most widely used projection for the contiguous US is the Albers Equal Area, USGS version.
+
+Because this projection does not have an EPSG number we will need to specify it in the proj4 or OGC WKT format.
+
+In a browser go to spatialreference.org and search for "Albers USGS".  
+
+For this lab, use the SR-ORG ID number 6703 and use CTRL-C to copy the Human-Readable OGC WKT version into the copy buffer.
+
+Paste it into your R script, add ' at the beginning and end, and assign it to a variable named usalberswkt.
+
+
+
+```{r}
+
+usalberswkt = 
+'PROJCS["USA_Contiguous_Albers_Equal_Area_Conic_USGS_version",
+    GEOGCS["GCS_North_American_1983",
+        DATUM["D_North_American_1983",
+            SPHEROID["GRS_1980",6378137.0,298.257222101]],
+        PRIMEM["Greenwich",0.0],
+        UNIT["Degree",0.0174532925199433]],
+    PROJECTION["Albers"],
+    PARAMETER["False_Easting",0.0],
+    PARAMETER["False_Northing",0.0],
+    PARAMETER["Central_Meridian",-96.0],
+    PARAMETER["Standard_Parallel_1",29.5],
+    PARAMETER["Standard_Parallel_2",45.5],
+    PARAMETER["Latitude_Of_Origin",23.0],
+    UNIT["Meter",1.0]]'
+
+statesaea = states %>% st_transform(usalberswkt)
+
+ggplot() +
+  geom_sf(data=states)
+
+ggplot() +
+  geom_sf(data=statesaea)
+
+```
+
+-----
+
+In your breakout groups, answer/discuss the following questions
+
+1. Why do we use ' as the string delimiter instead of "?    
+2. This USGS Albers projection is good for the US.  But is it good for Georgia?    
+3. What single number in the usalberswkt OGC WKT text could we change so Georgia (and the rest of the southeast) is not tilted down to the left  Try changing it and re-running ggplot to see the result.    
+
+-----
+
+# Task 3: Projecting with a proj4 string
+
+An alternate way to specify a projection for sf is a proj4 string.  Back at spatialreference.org search for UTM zone 16N and click on the one named NAD83 / UTM zone 16N (EPSG: 26916).  Click on the underlined Proj4 and use CTRL-C to copy the string into the copy buffer.
+
+Paste it into your script, add " or ' as string delimiters, and assign it to the variable name utm16.
+
+Enter the code to re-project states and plot the results with ggplot.
+
+```{r}
+utm16 = "+proj=utm +zone=16 +ellps=GRS80 +datum=NAD83 +units=m +no_defs" 
+statesutm16 = states %>% st_transform(utm16)
+
+ggplot() +
+  geom_sf(data=statesutm16)
+```
+
+
+
+Rather than use lat/lon, when doing spatial analysis it's almost always better to use projected units.  We'll project all our input datasets into the USGS Albers, and append a 2 to each name.
+
+```{r}
+
+counties2 = counties %>% st_transform(usalberswkt)
+nercs2 = nercs %>% st_transform(usalberswkt)
+states2 = states %>% st_transform(usalberswkt)
+tlines2 = tlines %>% st_transform(usalberswkt)
+plants2 = plants %>% st_transform(usalberswkt)
+
+```
+
+-----
+
+# Task 4: Spatial joins
+
+An ordinary join matches records from two dataframes using columns of shared values. A spatial join matches features from two spatial dataframes using a geographic relationship between features; and it copies attributes from the joined spatial dataframe to the source spatial dataframe.
+
+Assume we want to simply assign each US county to a NERC region.  We could conduct a long, complex polygon overlay, but an alternate quick method is to convert county polygons to centroids, then conduct a spatial join to join NERC attributes to each centroid.
+
+
+```{r}
+
+coucents2 = st_centroid(counties2)
+
+counerc2 = coucents2 %>% st_join(nercs2, join = st_intersects)
+counerc3 = st_drop_geometry(counerc2) %>% 
+  select(geoid,nerc,nerc_label)
+counerc4 = counties %>% left_join(counerc3)
+
+
+```
+
+1. What kind of features does each step in the analysis produce?
+2. Why do we need to drop the geometry to create counerc3?
+3. How would you alter this code to produce a single counerc output polygon dataset without creating counerc1, counerc2, and counerc4?
+
+-----
+
+We'll now plot the results, and plot a zoomed-in version for Texas.  Use CTRL-C and CTRL-V to paste this text into your R script, and run each piece of it.
+
+Run each command below
+
+```{r}
+
+zoomx = function(sfin){
+ box = st_bbox(sfin)
+ xlimits = c(box$xmin,box$xmax)
+ return(xlimits) }
+ 
+zoomy = function(sfin){
+ box = st_bbox(sfin)
+ ylimits = c(box$ymin,box$ymax)
+ return(ylimits) }
+
+ggplot() +
+  geom_sf(data=states2) +
+  geom_sf(data=counerc4, aes(fill=nerc))
+
+targstates = states2 %>% filter(name %in% c("Texas"))
+
+ggplot() +
+  geom_sf(data=states2) +
+  geom_sf(data=counerc4, aes(fill=nerc)) +
+  geom_sf(data=states2,fill=NA,size=2) +
+  geom_sf(data=nercs2,fill=NA,color="purple") + 
+  coord_sf(xlim=zoomx(targstates),ylim=zoomy(targstates))
+
+```
+
+Zooming to a map area is somewhat awkward in ggplot.  You use an extra + and command of the form:  
+   
+  coord_sf(xlim = c(-20, 45), ylim = c(30, 73)
+  
+However, for any sf dataset you can extract the bounding box with a command of the form
+
+   box = st_bbox(states2)  
+   
+which produces output of the form
+
+           xmin       ymin       xmax       ymax   
+     -2356113.7   268660.9  2258154.4  3165721.7   
+      
+1. Examine the zoomx and zoomy functions above.  What do they accomplish?
+2. Alter the code above so you zoom to Texas and three of its neighbors: New Mexico, Louisiana, and Oklahoma, and create that map.
+
+-----
+
+The spatial join operation has a number of different geographic relationships that can be used to join features.  If you use st_join without any special arguments, the actual command issued includes the default geographic relationship, which is st_intersects.  The command shown below is the one that is really executed when you type the counerc1 command in the sequence above.
+
+counerc2 = coucents2 %>% st_join(nercs2, join = st_intersects)
+
+You can substitute other geographic relationships, such as:
+
+st_contains_properly  
+st_contains  
+
+st_covered_by  
+st_covers 
+
+st_crosses  
+
+st_disjoint  
+
+st_equals_exact  
+st_equals  
+
+st_is_within_distance  
+st_nearest_feature  
+
+st_overlaps 
+st_touches  
+st_within  
+
+As discussed below in Task 6, st_intersects returns a set of TRUE/FALSE values as st_join tries to match each record in the first(input) dataframe to each record in the join (second) dataframe, using the specified (or default st_intersects) geographic relationship.
+
+If the match attempt returns TRUE, an output record is created combining the attributes of the first dataframe and the attributes of the second dataframe.
+
+-----
+
+# Task 5: Buffers
+
+Our next task is to identify areas within 10 miles (16.09 km) of a Georgia high voltage transmission line.
+
+We will first clip the national tlines dataset to the Georgia boundary, project the tlines data into a projected coordinate system, buffer the lines, and re-project back to WGS84.
+
+```{r}
+
+georgia2 = states2 %>% filter(name == "Georgia")
+
+gatlines2 = tlines2 %>% st_intersection(georgia2) 
+
+ggplot() +
+  geom_sf(data=georgia2) +
+  geom_sf(data=gatlines2,color="orange")
+
+```
+
+Check the ggplot to confirm that the intersection/clip has worked correctly.
+
+-----
+
+We now create the buffer:
+
+```{r}
+
+gatbuffer2 = gatlines2 %>% st_buffer(dist=16093.4)
+
+ggplot() +
+  geom_sf(data=georgia2) +
+  geom_sf(data=gatbuffer2,color="green")
+
+gatbuffer3 = st_union(gatbuffer2)
+
+ggplot() +
+  geom_sf(data=georgia2) +
+  geom_sf(data=gatbuffer3,color="green")
+
+gatbuffer4 = st_sf(gatbuffer3) %>% 
+  mutate(buffdist = "16093.4 meters")
+
+ggplot() +
+  geom_sf(data=georgia2) +
+  geom_sf(data=gatbuffer4,color="green")
+
+
+```
+
+1. Compare the first, second, and third plots.  What does the st_union() command accomplish?
+2. The second and third plots look identical.  But what are the object types of gatbuffer3 and gatbuffer4? 
+3. What does the st_sf() command accomplish?  
+4. Note: sf spatial analysis commands don't always return sf objects, even when that's what we would expect.  We need to pay attention to sf command output types.
+
+-----
+
+# Task 6: Point in polygon
+
+We would now like to test whether most of Georgia's large power plants fall inside the 10-mile buffer around major transmission lines.
+
+We first pull Georgia's plants from the national plant dataset.
+
+The crucial operation is st_intersets(), which returns a matrix of TRUE or FALSE values depending on whether each object intersects another set of objects.  The sparse=FALSE clause ensures that both TRUE and FALSE values are returned, rather than only TRUE values.
+
+
+```{r}
+gaplants2 = plants2 %>% st_intersection(georgia2)
+
+neartlines2 = gaplants2 %>% st_intersects(gatbuffer4, sparse=FALSE)
+neartlines3 = data.frame(neartlines2)
+
+gaplants3 = gaplants2 %>% bind_cols(neartlines3)
+
+ggplot() +
+  geom_sf(data=georgia2) +
+  geom_sf(data=gatbuffer4,color="green") +
+  geom_sf(data=gatlines2,color="orange") +
+  geom_sf(data=gaplants3,aes(color=neartlines2))
+
+```
+
+1. Are most of the plants within 10 miles of major transmission lines?
+2. What area of the state has a concentration of major lines, but very few plants?
+
+-----
+
+# Task 7: Dissolving (merging) polygons with common attribute values.
+
+One final spatial task: merging polygons that share an attribute value.  We wish to generate a polygon dataset with one polygon for each of the nine Census divisions, each of which consists of a number of states.  Georgia is in the South Atlantic division, which stretches from Georgia north to Maryland.
+
+We are able to conduct the merge without using a special st command.  Instead we can use the dplyr group_by and summarize commands.  In one step we are able to both merge polygons and aggregate individual state numbers into division numbers.
+
+We first read a dataset of state information.  It includes a record for each state and several fields, include the states division code and division name.
+
+```{r}
+stateinfo = read_excel("./data/stateinfo5.xls") %>% 
+  rename(name = statename)
+
+states3 = states2 %>% left_join(stateinfo)
+
+divisions2 = states3 %>% group_by(divname) %>% 
+  summarize(aland = sum(aland),
+            awater = sum(awater))
+
+ggplot() +
+  geom_sf(data=divisions2,aes(fill=divname)) 
+
+ggplot() +
+  geom_sf(data=divisions2,aes(fill=divname)) +
+  geom_sf(data=states2,alpha=0) 
+
+```
+
+1. Check the ggplot output for correctness.  In the second plot, what does alpha=0 do? Try alpha values of 0.5 and 1.0.
+2. Why rename the statename variable to name during the creation of states2?
+3. How have these commands handled aland and awater values?
+
