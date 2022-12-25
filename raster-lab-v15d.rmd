@@ -1,0 +1,359 @@
+---
+title: "Raster Lab"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+always_allow_html: true
+---
+
+
+# Task 1: Setup the lab
+
+Before running setup you may need to install the viridis package with the install.packages("viridis") command.
+
+Open R studio, open, and run raster-lab-setup.R to setup the lab and load the spatial datasets.
+
+```{r, results=FALSE, message=FALSE, warning=FALSE, include=TRUE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(warnings = FALSE)
+library(tidyverse)
+library(readxl)
+library(RColorBrewer)
+library(viridis)
+library(sf)
+library(raster)
+library(tmap)
+
+
+setwd("c:/temp/class2122")
+
+source("c:/temp/class2122/functions.R")
+
+
+# Task 1: Lab setup
+
+# climate data is in wgs84 (EPSG 4326)
+#    other data will need to be re-projected
+vwgs84 = 4326
+rwgs84 = "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"
+
+usst1 = st_read("cb_2018_us_state_20m.shp") %>%
+  tolow() %>%
+  # restrict analysis to coterminous US
+  filter(name != 'Puerto Rico' &
+           name != 'American Samoa' &
+           name != 'United States Virgin Islands' &
+           name != 'Commonwealth of the Northern Mariana Islands' &
+           name != 'Alaska' &
+           name != 'Hawaii' &
+           name != 'Guam') %>% 
+  st_transform(vwgs84)
+
+usco1 = st_read("cb_2018_us_county_20m.shp") %>%
+  tolow()  %>% 
+  mutate(geoid = paste0("g",geoid)) %>% 
+  st_transform(wgs84) %>% 
+  # restrict analysis to coterminous US
+  st_intersection(usst1)
+
+roads = st_read("primaryroads4.shp") %>%
+  tolow() %>% 
+  # limit to Interstates
+  filter(rttyp == "I") %>% 
+  st_transform(vwgs84)
+
+gast1 = usst1 %>% 
+  filter(statefp=='13') 
+
+gaco1 = usco1 %>% 
+  filter(statefp == "13") 
+
+fuldekco1 = gaco1 %>% filter(name %in% c("Fulton", "Dekalb"))
+taylorco1 = gaco1 %>% filter(name %in% c("Taylor"))
+
+
+```
+
+-----
+
+# Task 2: Drawing with tmap reminder
+
+Reminder from the Tmap lab: The tmap grammer is, in general, similar to ggplot, with commands in a sequence linked by a "+" character.  One difference is that datasets are drawn with pairs of commands, a tm_shape() command that defines the input data, followed by a point, line, polygon, or raster drawing command.
+
+The following commands will draw Georgia county polygons in light green and the Georgia state borders with extra line width.
+
+```{r}
+tm_shape(gaco1) +
+  tm_polygons(col="lightgreen") +
+tm_shape(gast1) +
+  tm_borders(lwd=3)
+```
+
+Question 1: what does the lwd parameter accomplish?
+Question 2: how do you get information on ALL the tm_borders parameters?
+
+-----
+
+# Task 3: Color palettes reminder
+
+Color palettes are as important to rasters as they are to vector-based thematic maps.  The RColorBrewer package contains a carefully curated set of named color ramps based upon cartographic map theory and practice.
+
+Here are the RColorBrewer and viridis palettes:
+
+![RColorBrewer palettes](./images/r-color-brewer.png)
+![RColorBrewer palettes](./images/viridis.jpg)
+
+Question: how do you "flip" a palette so the former low color is the new high color?
+
+In the following tmap command we specify the "YlGnBU" palette.
+
+```{r}
+tm_shape(gaco1) +
+  tm_polygons(col="aland",palette="YlGnBu") +
+tm_shape(gast1) +
+  tm_borders(lwd=3)
+```
+
+Note: We have used regular shape/draw commands from tmap.  But there is also a qtm (quick tmap) command. Try this command: qtm(gaco1,"aland") and this command: qtm(gaco1,"aland",fill.palette="YlGnBu)
+
+
+-----
+
+# Task 4: Reading geotif raster files
+
+GHI stands for global horizontal irradiance.  It is the basic measure of solar radiation used for flat-plane solar collectors such as solar panels. The GHI calculation includes factors, such as clound cover, that reduce the amount of effective solar radition.
+
+GHI maps usually show kWh per square meter per day (kWh/m2/d).  The GHI is usually a mean monthly or annual value, and is often averaged over multiple years.
+
+The raster package command raster() will read various types of raster files.  It will use the three letter file extension to determine the type of the input file.
+
+The following commands read national U.S. GHI geotif file developed by the National Renewables Energy Laboratory (NREL) and set the CRS to WGS84.  Note: the raster package uses a proj4 CRS formulation to set CRS information with either 
+
+1. an "+init=" value for an EPSG designation or
+2. a full set of proj4 "+" parameters, and
+3. unlike sf it can not accept a WKT CRS format
+
+
+```{r}
+
+usghi = raster("c:/temp/class2122/nsrdb3_ghi.tif")
+crs(usghi) = rwgs84
+
+tmap_mode("plot")
+
+tm_shape(usghi) +
+  tm_raster()
+
+```
+
+Question: why is the raster crs named rwgs84?
+
+
+Here's how to get basic information for the raster
+
+```{r}
+usghi
+```
+
+# Task 5: Creating a sub-raster for a specific area
+
+To generate a local raster file that includes only Georgia we must
+
+1. apply a vector polygon mask to select only raster cells inside the Georgia polygon and
+2. reset the raster size by cropping the bounding box to the Georgia polygon bounding box.
+
+To save a bit of coding work we can apply the raster package's mask and crop functions in the same step by nesting the mask function inside the crop function.
+
+
+```{r}
+
+gaghi = crop(mask(usghi,gast1),gast1)
+
+tmap_mode("plot")
+
+tm_shape(gaghi) +
+  tm_raster() +
+  tm_layout(legend.position=c("right","top"))
+
+```
+
+The code below adds extra elements to the tmap.
+
+
+
+```{r}
+
+tmap_mode("plot")
+
+tm_shape(gaghi) +
+  tm_raster(alpha=.8, pal="plasma",
+            title="GHI: kWh/m2/d") +
+tm_shape(gaco1) +
+  tm_borders() +  
+tm_layout(legend.position=c("right", "top"),
+          legend.bg.color="white")
+```
+
+Question 1: What does the code for each of these parameters accomplish?
+
+1. alpha
+2. title
+3. two legend parameters
+
+Question 2: what is the source of the "plasma" palette?
+
+
+-----
+
+
+# Task 6: Building an interactive map with basemaps
+
+We can also build a tmap interactive map.  In interactive mode we can add different basemaps, including OpenStreetMap.
+
+Note: the lab pdf can't include interactive maps, so the tmap_mode command must be changed from the "plot" mode to the "view" mode before running the code.
+
+```{r, fig.show='hide'}
+tmap_mode("view")
+
+tm_basemap("OpenStreetMap") +
+tm_shape(gaghi) +
+  tm_raster(alpha=.8, pal="plasma",
+            title="GHI: kWh/m2/d") +
+tm_shape(gaco1) +
+  tm_borders() +
+tm_shape(roads) +
+  tm_lines(col="red")
+```
+
+Explore the interactive map.
+
+What are the default interactive map basemap layers?
+
+
+Here is the Esri.DeLorme basemap:
+
+```{r, fig.show='hide'}
+tmap_mode("view")
+
+tm_basemap("Esri.DeLorme") +
+tm_shape(gaghi) +
+  tm_raster(alpha=.8, pal="plasma",
+            title="GHI: kWh/m2/d") +
+tm_shape(gaco1) +
+  tm_borders() 
+```
+
+There are multiple basemap providers.  Type the command "providers" to see a list.
+
+-----
+
+# Task 7: Averaging raster values for polygons
+
+The raster package extract() command is similar to the group_by() and summarize() command sequence in dplyr.  It takes input of a raster dataset and a vector dataset consisting of one or more polygons.  It can calculate the raster's sum, mean, min, max, or apply other functions to the raster values within each polygon.
+
+The code below calculates the average ghi value for each Georgia county, then adds the mean values to the original county sf file.
+
+```{r}
+
+mapvalue1 = raster::extract(gaghi,gaco1,fun=mean,na.rm=TRUE)
+mapvalue2 = as.data.frame(mapvalue1)
+gaco2 = bind_cols(gaco1,mapvalue2) %>% 
+  rename(ghi=V1) %>% 
+  dplyr::select(name, ghi)
+
+```
+
+
+Run the code below to create a thematic map of county ghi.
+
+```{r}
+
+tmap_mode("plot")
+
+tm_shape(gaco2) +
+  tm_polygons("ghi",palette="Reds")
+
+```
+
+
+Run the code below to create an interactive version.  Mouse-over a county to see its name.  Click on a county to popup its name and ghi.
+
+```{r, fig.show='hide'}
+
+tmap_mode("view")
+
+tm_shape(gaco2) +
+  tm_polygons("ghi",palette="Reds")
+
+```
+
+
+# Task 8: Raster statistics
+
+You can apply many common R commands to rasters.  For example:
+
+```{r}
+summary(gaghi)
+```
+
+```{r}
+tmap_mode("plot")
+hist(gaghi)
+boxplot(gaghi)
+```
+
+
+# Task 9: Advanced terrain functions
+
+The following code reads a Georgia digital elevation model (DEM).  DEMs are important for climate change since there is general agreement that centralized thermal solar and solar PV farms require slope under 5 percent.  Elevation, slope, and aspect data is also important for the location of wind farms.
+
+```{r}
+
+tmap_mode("plot")
+
+e1 = raster("c:/temp/class2122/gadem2.tif")
+
+tm_shape(e1) +
+ tm_raster() +
+tm_shape(gaco1) +
+ tm_borders() +
+tm_layout(legend.position=c("right","top"),
+          legend.bg.color="white")
+```
+
+Question 1: How do you get the CRS information for the raster?
+
+Question 2: What are the xy units?
+
+Question 3: What are the z units?  (You may need to do some quick Internet research to answer this question.)
+
+Question 4: If the vertical units are meters and the horizontal ones are feet, what could be the problem in calculating slope?
+
+-----
+
+
+# Task 10: Creating slope and aspect rasters
+
+We can now use the terrain function to create slope and aspect maps.  Aspect is the direction that sloped land faces.
+
+The tmap commands use the fuldekco1 file to zoom to the Atlanta area.  Note Stone Mountain to the east, and the Chattahoochee River flowing to the southwest along Fulton County's eastern border.
+
+```{r}
+s1 = terrain(e1, opt="slope", unit="degrees", neighbors=4)
+a1 = terrain(e1, opt="aspect", unit="degrees", neighbors=4)
+
+tm_shape(fuldekco1) +
+  tm_borders() +
+tm_shape(s1) +
+ tm_raster(palette="Oranges",breaks=c(0,1,3,5,10,15,40)) +
+tm_shape(gaco1) +
+ tm_borders() +
+tm_layout(legend.position=c("left","top"),
+          legend.bg.color="white")
+
+
+
+```
+
