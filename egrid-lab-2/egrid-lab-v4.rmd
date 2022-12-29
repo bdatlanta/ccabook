@@ -1,0 +1,282 @@
+---
+title: "eGRID Visualization Lab"
+output:
+  html_document:
+    df_print: paged
+---
+
+# Lab setup
+
+Start RStudio and open the egrid-lab-setup.R file.
+
+Use the mouse to highlight all the code and press CTRL+ENTER or the Run button in the upper-right of the editor window.
+
+These commands will load the necessary libraries, create a dataframe from the eGRID spreadsheet, select the important variables for the lab, and rename them for ease of use and understanding.  You will already have run a copy of them in the egrid-lab-setup.R file.
+
+```{r setup, include=TRUE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(readxl)
+source("./functions/functions1a.R")
+
+egrid1 = read_excel("./data/egrid2018_data_v2.xlsx",
+                sheet="PLNT18",skip=1) %>% 
+         tolow2()
+
+egrid2 = egrid1 %>% mutate(StateAbbr = pstatabb,
+                           PlantName = pname,
+                           NamePlateCapMW = namepcap,
+                           Fuel = plfuelct,
+                           NetGenGWh = plngenan/10^3,
+                           CO2tonsm = replace_na(plco2eqa,0)/10^6) %>% 
+                   select(StateAbbr, PlantName, Fuel,
+                          NamePlateCapMW,
+                          NetGenGWh,
+                          CO2tonsm,
+                          lat,lon)
+
+st2 = egrid2 %>% filter(StateAbbr == "GA") 
+st3 = st2 %>% filter(NamePlateCapMW >= 1000)
+
+```
+
+# eGRID
+
+The focus of this lab is using ggplot2 for basic visualization of power plant level electricity and CO2 emissions data from the EPA eGRID dataset.  eGRID stands for "Emissions & Generation Resource Integrated Database" and is available from
+
+https://www.epa.gov/egrid
+
+
+Initial code from above has already loaded the 2018 EPA Egrid dataset from the egrid2018_data_v2.xlsx spreadsheet.  That spreadsheet is located in a subdirectory named "data" one level down from your working directory.  Throughout the course we will store input data in its own folder so we can easily find it and update it whenever new data becomes available.  As long as the data format has not changed, our R code should work exactly the same way with the updated data.
+
+The setup code has also selected a subset of varibles and renamed them for convenience, and created two additional datasets:
+
+   st2 has only Georgia power plants
+   st3 has only large (over 1.0 GW) Georgia power plants
+
+Type each of the following commands into the console to confirm your current working directory and explore basic information about the st3 dataset:
+
+```{r eGRID}
+
+getwd()
+
+summary(st3)
+
+head(st3)
+
+glimpse(st3)
+
+View(st3)
+
+
+```
+
+
+Remember:
+
+NamePlateCapMW: nameplate plant capacity in megawatts of power
+
+NetGenGWh:      annual net generation in gigawatt-hours of energy
+
+# Customary and SI (Metric) terms for large numbers
+
+You'll just have to memorize these.
+
+**Large number abbreviations**
+
+*  k (kilo) = 1,000 (10^3) or thousands
+*  m (mega) = 1,000,000 (10^6) or millions
+*  g (giga) = 1,000,000,000 (10^9) or billions
+*  t (tera) = 1,000,000,000,000 (10^12) or trillions
+*  p (peta) = 1,000,000,000,000,000 (10^15) or quadrillions or quads
+
+For reference, in 2019 Georgia retail electricity sales were
+
+*   139,300,990 MWh or
+*   139,301 GWh or
+*   139.3 TWh
+
+For a state population of 10.6 million, that's about 13 MWh per person
+
+# Mapping eGRID
+
+We can use tmap to visualize electricity generation across Georgia:
+
+```{r}
+tmap_mode("view")
+
+tm_shape(gacounty) +
+  tm_polygons(col="palegreen") +
+tm_shape(istates) +
+  tm_lines(col="tomato4") +
+tm_shape(st2geo) +
+  tm_dots("Fuel", size="NetGenGWh")
+```
+
+Since solar plants are relatively small compared to large conventional plants, this map shows only solar:
+
+```{r}
+tm_shape(gacounty) +
+  tm_polygons(col="palegreen") +
+tm_shape(istates) +
+  tm_lines(col="tomato4") +
+tm_shape(stsolargeo) +
+  tm_dots(col="yellow",size="NetGenGWh")
+```
+
+
+# Power, Energy, and Capacity Factors
+
+![My Speedometer](./images/speedometer2.jpg "My Speedometer"){ width=50% }
+
+What is the speed nameplate capacity of my 2002 Toyota Camry?  What's the 220 number near the 140?  Does the top speed of my Camry care whether it's measured in miles per hour, kilometers per hour, or feet per second?
+
+See below for a real solar panel nameplate.
+
+![Solar Panel Nameplate](./images/solar-nameplate.png "Solar Panel Nameplate"){ width=50% }
+
+## Basic energy/heat/work units:
+
+**One Joule** (metric): the work done by a force of one newton when its point of application moves one meter 
+
+**One BTU** (British thermal unit, Customary): amount of heat required to raise the temperature of one pound of water by one degree.
+
+Sidenote 1: 1 BTU = 1055 Joules.  In the US we use BTUs as the basic unit of energy/heat/work.
+
+Sidenote 2: energy, heat, and work are all measured in energy units. See figures below for electricity transformed into heat and work.
+
+
+![Electricity transformed into heat](./images/heater.jpg "Electricity transformed into heat"){ width=50% }
+
+
+
+
+![Electricity transformed into work](./images/fan.jpg "Electricity transformed into work"){ width=50% }
+
+
+
+## Power units for electricity
+
+For electricity generation, power is the generator's output in terms of Watts.  One Watt is one joule of energy delivered in one second.  It is a rate, similar to speed in miles per hour.  For electricity generation power is important since the electricity system's input power (in Watts generated) must always match quite closely the system's output (in Watts consumed).
+
+## Energy units for electricity
+
+For electricity generation, energy is the accumulated power over a specific period of time.  One kilowatt-hour is equal to one kilowatt of power (about one microwave oven, or ten traditional 100-watt lightbulbs) delivered over one hour.  For climate change, we must measure energy consumed in the generation of electricity (sadly in customary BTU units rather than metric joules) to calculate the amount of CO2 released.
+
+Note: 1 kWh in energy is equal to 3412.14 BTUs of energy
+
+## Capacity factors
+
+A capacity factor is the ratio of an electricity generator's actual monthly or annual electrical energy produced divided by its maximum nameplate energy output for the same period.
+
+Use the View(st3) command to find the nameplate capacity of Plant Hatch (in megawatts) and its actual 2018 output in gigawatt-hours.  Then carry out the calculations shown below to calculate Plant Hatch's capacity factor.
+
+```{r Plant Hatch capacity factor}
+# View(st3)
+# Plant Hatch (nuclear)
+
+actualgwh = 14404
+npcapacitymw = 1722
+# convert MW to GW
+npcapacitygw = npcapacitymw / 10^3
+# find output if run 24 hours per day 365.25 days per year
+npoutputgwh = npcapacitygw * 24 * 365.25
+# calculate ratio of actual output to nameplate output
+capacityfactor = actualgwh / npoutputgwh
+print(capacityfactor)
+
+```
+Over one year what percentage of the time is Plant Hatch producing electricity?
+
+Why do utilities tend to run nuclear plants (almost) all the time?
+
+Now conduct similar calculations for Plant Sherer (coal).
+
+```{r Plant Sherer capacity factor}
+actualgwh = 15420
+npcapacitymw = 3564
+
+npcapacitygw = npcapacitymw / 10^3
+
+npoutputgwh = npcapacitygw * 24 * 365.25
+
+capacityfactor = actualgwh / npoutputgwh
+print(capacityfactor)
+```
+
+Why less than 50%?  What electricity energy source is gradually pushing out coal?
+
+# Utility-scale solar farms in Georgia
+
+```{r Utility scale solar PV}
+
+
+stsolar = st2 %>% filter(Fuel=="SOLAR")
+
+ggplot(data=stsolar, aes(x=NamePlateCapMW,y=NetGenGWh,color=Fuel)) +
+  geom_point(size=3) +
+  geom_text(aes(label=PlantName,color=Fuel,
+                hjust=1,vjust=1))
+
+```
+
+```{r}
+ ggplot(data=stsolar, aes(x=NamePlateCapMW,y=NetGenGWh,color=Fuel)) +
+  geom_point(size=3) +
+  geom_smooth(aes(x=NamePlateCapMW,y=NetGenGWh,col=Fuel),
+              method=lm,se=FALSE)
+  geom_text(aes(label=PlantName,color=Fuel,
+                hjust=1,vjust=1))
+```
+
+
+
+
+Capacity factor calculations for Taylor County Solar
+
+```{r Taylor County solar capacity factor}
+
+# View(st3) or #View(stsolar)
+
+actualgwh = 288.968
+npcapacitymw = 148
+
+npcapacitygw = npcapacitymw / 10^3
+
+npoutputgwh = npcapacitygw * 24 * 365.25
+
+capacityfactor = actualgwh / npoutputgwh
+print(capacityfactor)
+```
+
+Side note: are you tired of entering the capacity factor calculation?  Wouldn't it be great if we could "package" that calculation, enter two numbers, and pop out the answer?
+
+
+The following command fits a regression line to the solar data
+```{r Fit regression line to all solar PV}
+summary(lm(data=stsolar, NetGenGWh ~ NamePlateCapMW))
+```
+
+Conclusion from the regression: in planning for utility-scale solar in Georgia we can take the MW nameplate capacity of the installation and double it to calculate the number of GWh delivered over a year.
+
+From earlier: Georgia consumes 139,301 GWh of electricity per year.  Assume, in the future, 45% of that electricity will be generated by nuclear, leaving 76616 GWh that we would like to be generated by future solar PV farms.
+.
+How many 150 MW solar farms (the size of the Taylor County farm, the largest currently in Georgia) would we need to meet the future demand for electricity?  How many would we need to construct per year to meet Biden's goal of zero-carbon electricity by 2035?
+
+The Taylor County solar farm (146 MW nameplate capacity) covers 911 acres.  
+
+How many acres of land are required to build 1 GWh of solar energy output in Georgia?
+
+How many square miles (at 640 acres per square mile) will it take to deliver 77000 GWh of solar electricity?
+
+Don't look below until you've done the calculation, but here are the steps
+
+![](./images/calcs1.png ""){ width=25% } 
+
+For reference, the city of Atlanta is 136 square miles.
+
+
+
+
+
+

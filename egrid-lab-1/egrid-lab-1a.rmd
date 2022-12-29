@@ -1,0 +1,266 @@
+---
+title: "egrid-lab-1a"
+author: "Bill Drummond"
+date: '2022-12-29'
+output: html_document
+---
+
+The source command loads custom functions, which include:      
+1. tolow(): converts all dataframe column names to legal, lower-case names  
+2. mid():   extracts a substring from a string based on start position and length  
+3. clip():  copies a dataframe into an enlarged copy buffer; like Ctrl-C
+
+
+```{r, results=FALSE, message=FALSE, warning=FALSE, include=TRUE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(warnings = FALSE)
+library(tidyverse)
+library(readxl)
+library(sf)
+library(tmap)
+
+source("functions.R")
+
+
+```
+
+
+---
+
+
+
+
+  
+## Background on electricity, dataframes, and dplyr
+
+### Electricity, power, and energy
+
+- Power is how much energy is delivered at an individual moment in time.  It is similar to speed.
+- Energy is how much power is delivered over time.  To simplify: power over time equals energy. It is similar to distance (speed over time equals distance)
+- We measure electricity power in Watts: a 1,000 Watt microwave oven delivers a kilowatt (= 1,000 Watts) of power.
+- We measure of electricity energy in kWh, or kilowatt hours.  1 kWh of energy is delivered by a 1,000 Watt microwave running for an hour.
+- In the U.S. we can also measure energy in British thermal units or Btus.  One kWh of energy equals 3412.14 Btus.
+- We describe electricity power plant size with MW (megawatts) of power.
+- A very large coal or natural gas plant may be 3,000 MW (or 3 GW).
+- A large solar farm in Georgia may be 200 MW.
+
+
+### Dataframes and dplyr
+
+- Dataframes are the way R stores data structured into rectangular arrays of rows and columns  
+  - Rows are entities; columns are characteristics of the entities 
+
+- dplyr is the main tidyverse package for manipulating dataframes  
+  - The **%>%** command pipes data from one dplyr command to the next  
+  - The **= (or <-)** command assigns a value to an object; in dplyr it sets the name of the final output of a series of dplyr commands  
+  - The **filter()** dplyr command removes rows from the dataframe that do not meet a condition  
+  - The **select()** dplyr command chooses columns from the dataframe and removes ones not chosen  
+  - The **mutate()** dplyr command calculates one or more new variables  
+  - The **ifelse()** function, used within mutate, defines a condition, the output value when the condition is true, and the output value when the condition is false
+
+---
+
+## Reads a spreadsheet to create egrid1
+
+### read_excel
+
+read_excel() can specify  
+-   a specific sheet within Excel file, and 
+-   the number of rows to skip before reading data, and 
+-   assumes the first row has column names followed by rows of data  
+
+```{r}
+egrid1 = read_excel("egrid2020_data_metric.xlsx",
+                    sheet="PLNT20",skip=1)
+```
+
+
+---
+
+## Creates egrid2
+
+- In a condition,  
+  - R specifies "or" with |, 
+  - specifies "and" with &,  
+  - and specifies "not" with !  
+
+- Note: giga is billions (10^9) mega is millions (10^6)
+- Note: MW are units of power, MWh are units of energy
+- Net generation (annual) is in MWh, and is converted to GWh by dividing by 10^6
+- co2 equivalent emissions is in metric tons, and is converted to millions of metric tons by dividing by 10^6.
+- Nameplate capacity is in MW, stays in MW.
+
+```{r}
+
+egrid2 = egrid1 %>% 
+  tolow() %>% 
+  filter(pstatabb == "GA" | pstatabb == "AL") %>% 
+  mutate(heatinbtum = plhtian,
+         netgengwh = plngenan/10^3,
+         epaemimmt = plco2eqa/10^6) %>% 
+  select(plantname = pname,
+         stateabbr = pstatabb,
+         fuel = plfuelct,
+         nameplatecapmw = namepcap,
+         heatinbtum,
+         netgengwh,
+         epaemimmt,
+         lat, lon)
+```
+
+
+---
+
+## Creates egrid3
+
+- The ifelse() function takes inputs of  
+  - T/F condition,  
+  - value to return if condition is true, and  
+  - value to return if condition is false  
+- The is.na() function tests to see if a value is NA (Not Available, or missing)  
+- power over time equals energy, so 1 MW of power delivered over an hour produces MWh of energy  
+- capacity factor is the percentage of    
+  - actual energy produced, divided by  
+  - maximum possible energy produced according to nameplate capacity  
+- heatinbtum is heat input (in btu millions) to generate electricity, which is the amount of energy released when burning fossil fuels or creating nuclear fission
+
+
+```{r}
+egrid3 = egrid2 %>% 
+  mutate(nameplatecapmw = ifelse(is.na(nameplatecapmw), 0, nameplatecapmw),
+         heatinbtum  =    ifelse(is.na(heatinbtum), 0, heatinbtum),
+         netgengwh =      ifelse(is.na(netgengwh), 0, netgengwh),
+         epaemimmt =      ifelse(is.na(epaemimmt), 0, epaemimmt),
+         capfactor = 100 * ((netgengwh*10^3) / 
+                            (nameplatecapmw*365*24)))
+```
+
+---
+
+## Reads CO2 coefficients for egrid fuels  
+
+- coefficients represent 
+  - grams of CO2 released per 1,000 btu of fuel burned or
+  - mmt of CO2 released per quadrillion btu of buel burned
+
+```{r}
+coef = read_excel("egrid-coef.xlsx")
+```
+
+
+---
+
+# Creates egrid4
+
+- This operation introduces left_join() to join columns from a second table based on matching values of a shared column or columns  
+- R automatically searches for any shared column(s), finds the "fuel" columns, matches identical fuel values, and copies the matching data from the second dataframe to the first  
+- Note 1: since a coefficient is grams of CO2 / 1000 btu, we convert millions of btu (btum) to thousands of btu when we divide by 10^3  
+- Note 2: the result of multiplying the coefficient times btu thousands is grams of CO2.  There are 1 million (10^6) grams in a metric ton and one million metric tons in 1 mmt so we divide grams by 10^12 to calculate millions of metric tons of CO2 released
+- Note 3: We also calculate the ratio of our calculated mmt to the EPA's mmt from the egrid spreadsheet
+
+```{r}
+egrid4 = egrid3 %>% 
+  left_join(coef) %>% 
+  mutate(calcemimmt = heatinbtum*10^3 * coef / 10^12,
+         calctoepa = 100*round(calcemimmt/epaemimmt,4))
+```
+
+---
+
+## Creates egrid4state by aggregating plant-level data to generate state-level data
+
+- These operations introduce group_by() and summarize()  
+  - group_by() divides the dataframe into separate subsets and can use one or more variables to create the subsets  
+  - summarize() creates one output row/record for each subset and conducts whatever operation is specified (sum, mean, etc.) to "summarize" all the records in each subgroup  
+  
+```{r}
+egrid4state = egrid4 %>% 
+  group_by(stateabbr) %>% 
+  summarize(netgengwh = sum(netgengwh,na.rm=T),
+            epaemimmt = sum(epaemimmt,na.rm=T),
+            calcemimmt = sum(calcemimmt,na.rm=T))
+
+egrid4statefuel = egrid4 %>% 
+  group_by(stateabbr,fuel) %>% 
+  summarize(netgengwh = sum(netgengwh,na.rm=T),
+            epaemimmt = sum(epaemimmt,na.rm=T),
+            calcemimmt = sum(calcemimmt,na.rm=T))
+```
+  
+## Creates egrid5 
+
+- We use the lon and lat fields to build a spatial data frame of points
+- The coordinate reference system is the ESPG number for common lat/lon coordinates
+
+
+```{r}
+egrid5 = egrid4 %>% 
+         filter(!(is.na(lat) | is.na(lon))) %>% 
+         st_as_sf(coords = c("lon", "lat"), 
+                    crs = 4326) 
+```
+
+
+## Creating interactive maps with tmap package
+
+- creates interactive map  
+- alternate mode is "plot" for static map  
+
+
+```{r}
+tmap_mode("view")
+```
+
+
+- plots spatial dataframe points on Open Street Map basemap  
+
+```{r}
+tm_basemap("OpenStreetMap") +
+  tm_shape(egrid5) +
+  tm_dots()
+```
+
+- colors dots by fuel field and   
+  - sizes dots by net generation in GWh
+  
+```{r}
+tm_basemap("OpenStreetMap") +
+  tm_shape(egrid5) +
+  tm_dots(col="fuel",size="netgengwh")
+```
+
+- adds imagery basemap and  
+  - sets layer opacity (opposite of transparency) to 50%
+  
+```{r}
+tm_basemap(providers$Esri.WorldImagery) +
+  tm_shape(egrid5) +
+  tm_dots(col="fuel",size="netgengwh",alpha=.50)
+```
+
+
+- nests dplyr filter command within tm_shape()
+  - to limit plants to solar ones, and
+  - uses OpenStreetMap basemap tiles
+
+```{r}
+tm_basemap("OpenStreetMap") +
+  tm_shape(egrid5 %>% filter(fuel=="SOLAR")) +
+  tm_dots(col="yellow", size="nameplatecapmw")
+```
+
+- maps dots with size based on emissions and
+- saves to a tmap object named m,
+- then saves the tmap object to an interactive html file 8" high
+
+```{r}
+m = tm_basemap("OpenStreetMap") +
+    tm_shape(egrid5) +
+    tm_dots(col="fuel", size="calcemimmt")
+
+
+tmap_save(m,"elecemissions.html",height=8)
+```
+
+

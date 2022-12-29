@@ -1,0 +1,29 @@
+---
+title: "egrid-lab-1a"
+author: "Bill Drummond"
+date: '2022-12-29'
+output: html_document
+---
+
+```{r, results=FALSE, message=FALSE, warning=FALSE, include=TRUE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(warnings = FALSE)
+library(tidyverse)
+library(readxl)
+
+# Task 1: Lab setup 
+
+Loads custom functions, which include:
+1. tolow(): converts all dataframe column names to legal, lower-case names
+2. mid():   extracts a substring from a string based on start position and length
+3. clip():  copies a dataframe into an enlarged copy buffer; like Ctrl-C
+
+source("functions.R")
+
+
+
+
+```
+
+
