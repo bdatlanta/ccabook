@@ -1,0 +1,10 @@
+introduction
+why-r
+why-climate-change
+lab-1-egrid-and-the-tidyverse
+lab-1-egrid-and-the-tidyverse-lab-1
+intro
+egrid
+fig:nice-fig
+tab:nice-tab
+egrid-and-the-tidyverse

@@ -1,0 +1,29 @@
+---
+title: "Test Climate Change Analytics with R"
+author: "Bill Drummond and Jonathan Drummond"
+site: bookdown::bookdown_site
+output: bookdown::gitbook
+documentclass: book
+link-citations: yes
+github-repo: ccabook
+description: "This is a test draft of the bookdown document for the CCA Book."
+---
+
+```{r eval=FALSE}
+install.packages("bookdown")
+# or the development version
+# devtools::install_github("rstudio/bookdown")
+```
+
+# Introduction
+
+In this book you will learn how to use R to analyze climate data.
+
+## Why R?
+
+R is a versatile programming and scripting langauge which is designed for statistics and data management. Additionally it's functionality is easily extended with additional packages, modules created and published by the community. There are thousands of packages available which allow R to do amazing things from machine learning to interactive mapping to writing a book. This book was written in R using the rmarkdown and bookdown packages.
+
+## Why Climate Change?
+
+We are passionate about climate change and believe that it is one of the most significant issues facing the world at this time. We can only begin to mitigate and adapt to its impacts with good information. Our goal is to provide students or anyone interested with the tools to process and understand some of the climate related data available and we hope that you will use it to make the world a better place.
+

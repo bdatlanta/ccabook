@@ -1,0 +1,3 @@
+# Egrid and the tidyverse
+
+This is the first lab of this book which will involve you, the reader, doing your own work in R. We cannot stop you from copy and pasting the code from here into your own R studio instance and running it, but we do not recommend it. We believe that typing the code yourself is the best way to learn!
